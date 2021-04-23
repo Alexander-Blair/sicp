@@ -1114,8 +1114,6 @@
    eval-dispatch
      (test (op self-evaluating?) (reg exp))
      (branch (label ev-self-eval))
-     (test (op thunk?) (reg exp))
-     (branch (label ev-thunk))
      (test (op variable?) (reg exp))
      (branch (label ev-variable))
      (test (op quoted?) (reg exp))
@@ -1140,28 +1138,12 @@
    ev-self-eval
      (assign val (reg exp))
      (goto (reg continue))
-   ev-thunk
-     (save env)
-     (save continue)
-     (assign env (op thunk-env) (reg exp))
-     (assign exp (op thunk-exp) (reg exp))
-     (assign continue (label ev-after-thunk))
-     (goto (label eval-dispatch))
-   ev-after-thunk
-     (restore continue)
-     (restore env)
-     (goto (reg continue))
    ev-variable
      (assign val
              (op lookup-variable-value)
              (reg exp)
              (reg env))
-     (test (op thunk?) (reg val))
-     (branch (label ev-thunk-variable))
      (goto (reg continue))
-   ev-thunk-variable
-     (assign exp (reg val))
-     (goto (label eval-dispatch))
    ev-quoted
      (assign val
              (op text-of-quotation)
@@ -1199,45 +1181,14 @@
      (assign proc (reg val))    ; the operator
      (test (op no-operands?) (reg unev))
      (branch (label apply-dispatch))
-   ev-appl-operand-loop
-     (assign exp (op first-operand) (reg unev))
-     (assign exp (op delay-it) (reg exp) (reg env))
-     (test (op last-operand?) (reg unev))
-     (branch (label ev-appl-last-arg))
-     (assign argl
-             (op adjoin-arg)
-             (reg exp)
-             (reg argl))
-     (assign unev
-             (op rest-operands)
-             (reg unev))
-     (goto (label ev-appl-operand-loop))
-   ev-appl-last-arg
-     (assign argl 
-             (op adjoin-arg)
-             (reg exp)
-             (reg argl))
-     (goto (label apply-dispatch))
-   apply-dispatch
-     (test (op primitive-procedure?) (reg proc))
-     (branch (label ev-primitive-accumulate-arg))
-     (test (op compound-procedure?) (reg proc))
-     (branch (label compound-apply))
-     (goto (label unknown-procedure-type))
-   ev-primitive-accumulate-arg
-     (test (op no-operands?) (reg unev))
-     (branch (label primitive-apply))
-     (perform (op user-print) (reg proc))
-     (assign unev (reg argl))
-     (assign argl (op empty-arglist))
      (save proc)
-   ev-appl-operand-loop-2
+   ev-appl-operand-loop
      (save argl)
      (assign exp
              (op first-operand)
              (reg unev))
      (test (op last-operand?) (reg unev))
-     (branch (label ev-appl-last-arg-2))
+     (branch (label ev-appl-last-arg))
      (save env)
      (save unev)
      (assign continue 
@@ -1254,20 +1205,25 @@
      (assign unev
              (op rest-operands)
              (reg unev))
-     (goto (label ev-appl-operand-loop-2))
-   ev-appl-last-arg-2
+     (goto (label ev-appl-operand-loop))
+   ev-appl-last-arg
      (assign continue 
-             (label ev-appl-accum-last-arg-2))
+             (label ev-appl-accum-last-arg))
      (goto (label eval-dispatch))
-   ev-appl-accum-last-arg-2
+   ev-appl-accum-last-arg
      (restore argl)
      (assign argl 
              (op adjoin-arg)
              (reg val)
              (reg argl))
-     (perform (op user-print) (reg argl))
      (restore proc)
-     (goto (label primitive-apply))
+     (goto (label apply-dispatch))
+   apply-dispatch
+     (test (op primitive-procedure?) (reg proc))
+     (branch (label primitive-apply))
+     (test (op compound-procedure?) (reg proc))
+     (branch (label compound-apply))
+     (goto (label unknown-procedure-type))
    primitive-apply
      (assign val
              (op apply-primitive-procedure)
@@ -1495,15 +1451,3 @@
   (make-machine
    eceval-operations
    eval-controller-insts))
-
-(define (append-with-if a b)
-  (if (null? a)
-      b
-      (cons (car a) (append-with-if (cdr a) b))))
-
-(define (append-with-cond a b)
-  (cond ((null? a) b)
-        (else (cons (car a) (append-with-cond (cdr a) b)))))
-
-; (define (try a b) (if (= a 0) 1 b))
-; (try 0 (/ 1 0))
