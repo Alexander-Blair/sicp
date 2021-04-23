@@ -215,3 +215,122 @@ ev-cond-actions
 ev-cond-no-match
   (assign val (const nil))
   (goto (reg continue))
+
+; 5.25
+
+; The primary changes that need to be made are as follows:
+
+; 1. Instead of evaluating arguments while building the arglist, create a thunk object,
+;    which contains the expression and env for it to be evaluated against.
+; 2. When a primitive procedure is about to be applied, you must then iterate through
+;    the list again, evaluating the expression and env of the thunk.
+
+; We introduce four new 'primitive' procedures:
+        (list 'thunk? thunk?)
+        (list 'thunk-exp thunk-exp)
+        (list 'thunk-env thunk-env)
+        (list 'delay-it delay-it)
+
+; For now, the way we resolve thunks is at the point of grabbing a variable. If the value
+; of the variable is a thunk, we evaluate the thunk. It may also be possible to check this
+   ev-variable
+     (assign val
+             (op lookup-variable-value)
+             (reg exp)
+             (reg env))
+     (test (op thunk?) (reg val))
+     (branch (label ev-thunk-variable))
+     (goto (reg continue))
+   ev-thunk-variable
+     (assign exp (reg val))
+     (goto (label eval-dispatch))
+
+; And the instructions to evaluate a thunk:
+   ev-thunk
+     (save env)
+     (save continue)
+     (assign env (op thunk-env) (reg exp))
+     (assign exp (op thunk-exp) (reg exp))
+     (assign continue (label ev-after-thunk))
+     (goto (label eval-dispatch))
+   ev-after-thunk
+     (restore continue)
+     (restore env)
+     (goto (reg continue))
+
+; We add the thunk? check immediately after self-evaluating check:
+   eval-dispatch
+     (test (op self-evaluating?) (reg exp))
+     (branch (label ev-self-eval))
+     (test (op thunk?) (reg exp))
+     (branch (label ev-thunk))
+     ...
+
+; ev-appl-operand-loop becomes significantly simpler since we don't evaluate
+; any of the arguments off the bat:
+   ev-appl-operand-loop
+     (assign exp (op first-operand) (reg unev))
+     (assign exp (op delay-it) (reg exp) (reg env))
+     (test (op last-operand?) (reg unev))
+     (branch (label ev-appl-last-arg))
+     (assign argl
+             (op adjoin-arg)
+             (reg exp)
+             (reg argl))
+     (assign unev
+             (op rest-operands)
+             (reg unev))
+     (goto (label ev-appl-operand-loop))
+   ev-appl-last-arg
+     (assign argl 
+             (op adjoin-arg)
+             (reg exp)
+             (reg argl))
+     (goto (label apply-dispatch))
+
+; We effectively reintroduce the logic that was removed from the previous subroutine
+; when we eventually have to evaluate the arguments (before applying a primitive procedure)
+   ev-primitive-accumulate-arg
+     (test (op no-operands?) (reg unev))
+     (branch (label primitive-apply))
+     (perform (op user-print) (reg proc))
+     (assign unev (reg argl))
+     (assign argl (op empty-arglist))
+     (save proc)
+   ev-appl-operand-loop-2
+     (save argl)
+     (assign exp
+             (op first-operand)
+             (reg unev))
+     (test (op last-operand?) (reg unev))
+     (branch (label ev-appl-last-arg-2))
+     (save env)
+     (save unev)
+     (assign continue 
+             (label ev-appl-accumulate-arg))
+     (goto (label eval-dispatch))
+   ev-appl-accumulate-arg
+     (restore unev)
+     (restore env)
+     (restore argl)
+     (assign argl 
+             (op adjoin-arg)
+             (reg val)
+             (reg argl))
+     (assign unev
+             (op rest-operands)
+             (reg unev))
+     (goto (label ev-appl-operand-loop-2))
+   ev-appl-last-arg-2
+     (assign continue 
+             (label ev-appl-accum-last-arg-2))
+     (goto (label eval-dispatch))
+   ev-appl-accum-last-arg-2
+     (restore argl)
+     (assign argl 
+             (op adjoin-arg)
+             (reg val)
+             (reg argl))
+     (perform (op user-print) (reg argl))
+     (restore proc)
+     (goto (label primitive-apply))
