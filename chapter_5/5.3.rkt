@@ -334,3 +334,25 @@ ev-cond-no-match
      (perform (op user-print) (reg argl))
      (restore proc)
      (goto (label primitive-apply))
+
+; 5.26
+
+; 1. Maximum depth is always 10
+
+; 2. Total number of push operations is 35n + 29. As you can see, the total number of
+; pushes increases by 35 each time. The we just need a top up of 29 to make it up to
+; the total push number:
+
+; (factorial 3) - 134 pushes
+; (factorial 4) - 169 pushes
+; (factorial 5) - 204 pushes
+; (factorial 6) - 239 pushes
+; (factorial 13) - 484 pushes
+
+;---------------------|-----------|------------------|
+;                     | max-depth | number-of-pushes |
+;---------------------|-----------|------------------|
+; recursive-factorial |  5n + 3   |    32n - 16      |
+;---------------------|-----------|------------------|
+; iterative-factorial |    10     |    35n + 29      |
+;---------------------|-----------|------------------|
