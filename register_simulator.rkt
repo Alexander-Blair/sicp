@@ -82,7 +82,7 @@
             ((eq? message 'trace-off)
              (set! trace-on false))
             (else
-             (error "Unknown request: REGISTER" message))))
+              (make-error (string-append "Unknown request: REGISTER " (symbol->string message))))))
     dispatch))
 
 (define (get-contents register)
@@ -104,7 +104,7 @@
             (max current-depth max-depth)))
     (define (pop)
       (if (null? s)
-          (error "Empty stack: POP")
+          (make-error "Empty stack: POP")
           (let ((top (car s)))
             (set! s (cdr s))
             (set! current-depth
@@ -769,15 +769,22 @@
 
 (define the-empty-environment '())
 
+(define (make-error error-msg)
+  (list 'error error-msg))
+(define (error-message error)
+  (cadr error))
+(define (error? exp)
+  (tagged-list? exp 'error))
+
 (define (lookup-variable-value var env)
   (define (env-loop env)
     (if (eq? env the-empty-environment)
-        (error "Unbound variable" var)
+        (make-error (string-append "Unbound variable: " (symbol->string var)))
         (traverse-env var
                       env
                       (lambda (definitions var env)
-                        (if (eq? (cadar definitions) "*unassigned*")
-                            (error "Variable has not yet been assigned: " var)
+                        (if (eq? (cadar definitions) '*unassigned*)
+                            (make-error (string-append "Variable has not yet been assigned: " (symbol->string var)))
                             (cadar definitions)))
                       (lambda (definitions var env)
                         (env-loop (enclosing-environment env))))))
@@ -901,11 +908,12 @@
 (define (set-variable-value! var val env)
   (define (env-loop env)
     (if (eq? env the-empty-environment)
-        (error "Unbound variable: SET!" var)
+        (make-error (string-append "Unbound variable: SET! " (symbol->string var)))
         (traverse-env var
                       env
                       (lambda (definitions var env)
-                        (set-car! (cdar definitions) val))
+                        (set-car! (cdar definitions) val)
+                        'done)
                       (lambda (definitions var env)
                         (env-loop (enclosing-environment env))))))
   (env-loop env))
@@ -1121,7 +1129,12 @@
              (op lookup-variable-value)
              (reg exp)
              (reg env))
+     (test (op error?) (reg val))
+     (branch (label ev-error))
      (goto (reg continue))
+   ev-error
+     (assign val (op error-message) (reg val))
+     (goto (label signal-error))
    ev-quoted
      (assign val
              (op text-of-quotation)
@@ -1322,10 +1335,12 @@
      (restore continue)
      (restore env)
      (restore unev)
-     (perform (op set-variable-value!)
-              (reg unev)
-              (reg val)
-              (reg env))
+     (assign val (op set-variable-value!)
+                 (reg unev)
+                 (reg val)
+                 (reg env))
+     (test (op error?) (reg val))
+     (branch (label ev-error))
      (assign val
              (const ok))
      (goto (reg continue))
@@ -1423,6 +1438,8 @@
         (list 'cond-clauses cond-clauses)
         (list 'let->combination let->combination)
         (list 'print-stack-statistics print-stack-statistics)
+        (list 'error? error?)
+        (list 'error-message error-message)
         ))
 
 (define eceval
