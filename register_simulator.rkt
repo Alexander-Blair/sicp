@@ -969,28 +969,6 @@
                 (lambda (definitions var env)
                   (add-binding-to-frame! var val (first-frame env)))))
 
-(define (cond->if exp)
-  (expand-clauses (cond-clauses exp)))
-
-(define (expand-clauses clauses)
-  (if (null? clauses)
-      'false     ; no else clause
-      (let ((first (car clauses))
-            (rest (cdr clauses)))
-        (if (cond-else-clause? first)
-            (if (null? rest)
-                (sequence->exp
-                 (cond-actions first))
-                (error "ELSE clause isn't last: COND->IF"
-                       clauses))
-            (make-if (cond-predicate first)
-                     (if (cond-arrow-procedure? (cond-actions first))
-                         ((cond-arrow-procedure (cond-actions first)) (cond-predicate first))
-                         (sequence->exp
-                          (cond-actions first)))
-                     (expand-clauses 
-                      rest))))))
-
 (define (make-if predicate 
                  consequent 
                  alternative)
