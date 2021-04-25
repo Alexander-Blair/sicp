@@ -349,6 +349,8 @@ ev-cond-no-match
 ; (factorial 6) - 239 pushes
 ; (factorial 13) - 484 pushes
 
+; 5.27
+
 ;---------------------|-----------|------------------|
 ;                     | max-depth | number-of-pushes |
 ;---------------------|-----------|------------------|
@@ -356,3 +358,88 @@ ev-cond-no-match
 ;---------------------|-----------|------------------|
 ; iterative-factorial |    10     |    35n + 29      |
 ;---------------------|-----------|------------------|
+
+; 5.28
+
+; Without treating final argument differently:
+;---------------------|-----------|------------------|
+;                     | max-depth | number-of-pushes |
+;---------------------|-----------|------------------|
+; recursive-factorial |  8n + 3   |    34n - 16      |
+;---------------------|-----------|------------------|
+; iterative-factorial |  3n + 14  |    37n + 33      |
+;---------------------|-----------|------------------|
+
+; 5.29
+
+; For function S, base cases are:
+; S(0) = 60
+; S(1) = 60
+; S(n) = S(n - 1) + S(n - 2)
+; To get the total number of pushes, S(n) - 42
+
+; Of course this is very reminiscent of the fibonacci sequence!
+
+; It can also be expressed as follows: S(n) = 60 * Fib(n + 1) - 42
+
+; 5.30
+
+; Part 1
+
+; As a preliminary implementation, we can create our own wrapper around an error,
+; which we can use to store a message, and check whether it's an error or not:
+(define (make-error error-msg)
+  (list 'error error-msg))
+(define (error-message error)
+  (cadr error))
+(define (error? exp)
+  (tagged-list? exp 'error))
+
+; As an example, lookup-variable-value procedure can now return an error from two places:
+(define (lookup-variable-value var env)
+  (define (env-loop env)
+    (if (eq? env the-empty-environment)
+        (make-error (string-append "Unbound variable: " (symbol->string var)))
+        (traverse-env var
+                      env
+                      (lambda (definitions var env)
+                        (if (eq? (cadar definitions) '*unassigned*)
+                            (make-error (string-append "Variable has not yet been assigned: " (symbol->string var)))
+                            (cadar definitions)))
+                      (lambda (definitions var env)
+                        (env-loop (enclosing-environment env))))))
+  (env-loop env))
+
+; The instructions are also updated to check for this after val has been assigned:
+   ev-variable
+     (assign val
+             (op lookup-variable-value)
+             (reg exp)
+             (reg env))
+     (test (op error?) (reg val))
+     (branch (label ev-error))
+     (goto (reg continue))
+
+; When we are setting a variable value, we now return a value from that operation, so we
+; can tell whether it succeeded or not:
+   ev-assignment-1
+     (restore continue)
+     (restore env)
+     (restore unev)
+     (assign val (op set-variable-value!)
+                 (reg unev)
+                 (reg val)
+                 (reg env))
+     (test (op error?) (reg val))
+     (branch (label ev-error))
+     (assign val
+             (const ok))
+     (goto (reg continue))
+
+; Note that the restore function could technically cause a crash; while we could add
+; an error check after every single restore, this would be a fatal problem with the
+; evaluator itself, not a useful user level error. This is the case with the rest of
+; the errors that are raised - they would be evaluator / machine bugs, as opposed to
+; errors raised during expressio evaluation itself.
+
+; Part 2.
