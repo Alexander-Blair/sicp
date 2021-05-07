@@ -874,9 +874,6 @@
 (define (apply-in-underlying-scheme proc args)
   (apply proc args))
 
-(define (primitive-implementation proc) 
-  (cadr proc))
-
 (define (apply-primitive-procedure proc args)
   (apply-in-underlying-scheme
    (primitive-implementation proc) args))
@@ -1001,30 +998,190 @@
 (define (cond-actions clause) 
   (cdr clause))
 
+(define (primitive-implementation proc)
+  ((cadr proc) 'implementation))
+(define (primitive-name proc)
+  ((cadr proc) 'name))
+(define (primitive-specifications proc)
+  ((cadr proc) 'specifications))
+(define (specification-proc specification)
+  (specification 'proc))
+(define (specification-error-message-proc specification)
+  (specification 'make-error-message))
+
+(define (coerce-to-string value)
+  (cond ((number? value) (number->string value))
+        ((symbol? value) (symbol->string value))))
+
+(define (validate-primitive-procedure proc args)
+  (define (iter specifications)
+    (cond ((null? specifications) true)
+          ((let ((spec (specification-proc (car specifications))))
+             (spec args))
+           (iter (cdr specifications)))
+          (else
+            (let ((make-error-message-proc (specification-error-message-proc (car specifications))))
+              (make-error (string-append (symbol->string (primitive-name proc))
+                                         ": "
+                                         (make-error-message-proc args)))))))
+  (iter (primitive-specifications proc)))
+
+(define (make-primitive-procedure name proc specifications)
+  (define (dispatch m)
+    (cond ((eq? m 'name) name)
+          ((eq? m 'implementation) proc)
+          ((eq? m 'specifications) specifications)))
+  dispatch)
+
+(define (arity-spec arity)
+  (define (make-error-message args)
+    (string-append "arity mismatch;"
+                   "\n  the expected number of arguments does not match the given number"
+                   "\n  expected: "
+                   (number->string arity)
+                   "\n  given: "
+                   (number->string (length args))))
+  (define (dispatch m)
+    (cond ((eq? m 'proc)
+           (lambda (args)
+             (= arity (length args))))
+          ((eq? m 'make-error-message) make-error-message)
+          (else (error "ARITY SPEC DISPATCH unknown message: " m))))
+  dispatch)
+
+(define (min-arity-spec min-arity)
+  (define (make-error-message args)
+    (string-append "arity mismatch;"
+                   "\n  the expected number of arguments does not match the given number"
+                   "\n  expected: at least "
+                   (number->string min-arity)
+                   "\n  given: "
+                   (number->string (length args))))
+  (define (dispatch m)
+    (cond ((eq? m 'proc)
+           (lambda (args)
+             (>= (length args) min-arity)))
+          ((eq? m 'make-error-message) make-error-message)
+          (else (error "MIN ARITY SPEC DISPATCH unknown message: " m))))
+  dispatch)
+
+(define (max-arity-spec max-arity)
+  (define (make-error-message args)
+    (string-append "arity mismatch;"
+                   "\n  the expected number of arguments does not match the given number"
+                   "\n  given: "
+                   (number->string (length args))))
+  (define (dispatch m)
+    (cond ((eq? m 'proc)
+           (lambda (args)
+             (<= (length args) max-arity)))
+          ((eq? m 'make-error-message) make-error-message)
+          (else (error "MAX ARITY SPEC DISPATCH unknown message: " m))))
+  dispatch)
+
+; Validates that the arguments from first-arg-position to last-arg position pass the
+; specification. If last-arg-position is not specified, it will validate from the
+; first-arg-position to the end of the arglist
+(define (contract-spec spec-name type-spec first-arg-position last-arg-position)
+  (if (and (not (null? last-arg-position))
+           (> first-arg-position last-arg-position))
+      (error "First arg position must not be greater than last arg position"))
+  (define (make-error-message args)
+    (validate args
+              (lambda (arg-position arg)
+                (string-append "contract violation"
+                               "\n  expected: "
+                               (symbol->string spec-name)
+                               "\n  given: "
+                               (coerce-to-string arg)
+                               "\n  argument position: "
+                               (number->string arg-position)))))
+  ; spec-failure-proc takes current arg position and the argument value
+  ; itself, and is called when the spec is violated
+  (define (validate args spec-failure-proc)
+    (define (iter arg-position rest-args)
+      (cond ((null? rest-args)
+             true)
+            ((and (not (null? last-arg-position))
+                  (> arg-position last-arg-position))
+             true)
+            ((< arg-position first-arg-position)
+             (iter (+ arg-position 1) (cdr rest-args)))
+            ((type-spec (car rest-args))
+             (iter (+ arg-position 1) (cdr rest-args)))
+            (else (spec-failure-proc arg-position (car rest-args)))))
+    (iter 0 args))
+  (define (dispatch m)
+    (cond ((eq? m 'proc)
+           (lambda (args)
+             (validate args
+                       (lambda (arg-position arg)
+                         false))))
+          ((eq? m 'make-error-message) make-error-message)
+          (else (error "CONTRACT SPEC DISPATCH unknown message: " m))))
+  dispatch)
+
+(define (division-by-zero-spec)
+  (define (any-zero-divisor? args)
+    (cond ((null? args) false)
+          ((= (car args) 0) true)
+          (else (any-zero-divisor? (cdr args)))))
+  (define (dispatch m)
+    (cond ((eq? m 'proc)
+           (lambda (args)
+             (not (any-zero-divisor? (cdr args)))))
+          ((eq? m 'make-error-message)
+           (lambda (args)
+             "division by zero"))
+          (else (error "DIVISION BY ZERO SPEC DISPATCH unknown message: " m))))
+  dispatch)
+
+(define (number-spec first-arg-position last-arg-position)
+  (contract-spec 'number? number? first-arg-position last-arg-position))
+
+(define (pair-spec first-arg-position last-arg-position)
+  (contract-spec 'pair? pair? first-arg-position last-arg-position))
+
+(define (string-spec first-arg-position last-arg-position)
+  (contract-spec 'string? string? first-arg-position last-arg-position))
+
+(define (output-port-spec first-arg-position last-arg-position)
+  (contract-spec 'output-port? output-port? first-arg-position last-arg-position))
+
 (define primitive-procedures
-  (list (list 'null? null?)
-        (list '+ +)
-        (list 'map map)
-        (list 'inc inc)
-        (list '= =)
-        (list '- -)
-        (list '* *)
-        (list '/ /)
-        (list 'runtime runtime)
-        (list '> >)
-        (list '< <)
-        (list '<= <=)
-        (list '>= >=)
-        (list 'eq? eq?)
-        (list 'cons cons)
-        (list 'car car)
-        (list 'cdr cdr)
-        (list 'display display)
-        (list 'list list)
-        (list 'not not)
-        (list 'even? even?)
-        (list 'remainder remainder)
-        ))
+  (list (list 'null? (make-primitive-procedure 'null? null? (list (arity-spec 1))))
+        (list '+ (make-primitive-procedure '+ + (list (number-spec 0 nil))))
+        (list 'inc (make-primitive-procedure 'inc inc (list (arity-spec 1)
+                                                            (number-spec 0 nil))))
+        (list '= (make-primitive-procedure '= = (list (min-arity-spec 1)
+                                                      (number-spec 0 nil))))
+        (list '- (make-primitive-procedure '- - (list (min-arity-spec 1)
+                                                      (number-spec 0 nil))))
+        (list '* (make-primitive-procedure '* * (list (number-spec 0 nil))))
+        (list '/ (make-primitive-procedure '/ / (list (min-arity-spec 1)
+                                                      (number-spec 0 nil)
+                                                      (division-by-zero-spec))))
+        (list 'runtime (make-primitive-procedure 'runtime runtime (list (arity-spec 0))))
+        (list '> (make-primitive-procedure '> > (list (min-arity-spec 1)
+                                                      (number-spec 0 nil))))
+        (list '< (make-primitive-procedure '< < (list (min-arity-spec 1)
+                                                      (number-spec 0 nil))))
+        (list '<= (make-primitive-procedure '<= <= (list (min-arity-spec 1)
+                                                         (number-spec 0 nil))))
+        (list '>= (make-primitive-procedure '>= >= (list (min-arity-spec 1)
+                                                         (number-spec 0 nil))))
+        (list 'eq? (make-primitive-procedure 'eq? eq? (list (arity-spec 2))))
+        (list 'cons (make-primitive-procedure 'cons cons (list (arity-spec 2))))
+        (list 'car (make-primitive-procedure 'car car (list (arity-spec 1)
+                                                            (pair-spec 0 nil))))
+        (list 'cdr (make-primitive-procedure 'cdr cdr (list (arity-spec 1)
+                                                            (pair-spec 0 nil))))
+        (list 'display (make-primitive-procedure 'display display (list (min-arity-spec 1)
+                                                                        (max-arity-spec 2)
+                                                                        (string-spec 0 0)
+                                                                        (output-port-spec 1 1))))
+        (list 'list (make-primitive-procedure 'list list (list)))
+        (list 'not (make-primitive-procedure 'not not (list (arity-spec 1))))))
 
 (define (primitive-procedure-names)
   (map car primitive-procedures))
@@ -1211,10 +1368,18 @@
      (goto (label apply-dispatch))
    apply-dispatch
      (test (op primitive-procedure?) (reg proc))
-     (branch (label primitive-apply))
+     (branch (label primitive-validate))
      (test (op compound-procedure?) (reg proc))
      (branch (label compound-apply))
      (goto (label unknown-procedure-type))
+   primitive-validate
+     (assign val
+             (op validate-primitive-procedure)
+             (reg proc)
+             (reg argl))
+     (test (op error?) (reg val))
+     (branch (label ev-error))
+     (goto (label primitive-apply))
    primitive-apply
      (assign val
              (op apply-primitive-procedure)
@@ -1396,6 +1561,7 @@
         (list 'procedure-environment procedure-environment)
         (list 'procedure-parameters procedure-parameters)
         (list 'apply-primitive-procedure apply-primitive-procedure)
+        (list 'validate-primitive-procedure validate-primitive-procedure)
         (list 'compound-procedure? compound-procedure?)
         (list 'primitive-procedure? primitive-procedure?)
         (list 'adjoin-arg adjoin-arg)
