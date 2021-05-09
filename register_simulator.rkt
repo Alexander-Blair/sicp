@@ -1314,14 +1314,26 @@
      (assign exp (op let->combination) (reg exp))
      (goto (label eval-dispatch))
    ev-application
-     (save continue)
-     (save env)
      (assign unev (op operands) (reg exp))
-     (save unev)
      (assign exp (op operator) (reg exp))
+     (save continue)
+     (test (op variable?) (reg exp))
+     (branch (label ev-operator-is-variable))
+     (save env)
+     (save unev)
      (assign
        continue (label ev-appl-did-operator))
      (goto (label eval-dispatch))
+   ev-operator-is-variable
+     (assign proc
+             (op lookup-variable-value)
+             (reg exp)
+             (reg env))
+     (assign argl (op empty-arglist))
+     (test (op no-operands?) (reg unev))
+     (branch (label apply-dispatch))
+     (save proc)
+     (goto (label ev-appl-operand-loop))
    ev-appl-did-operator
      (restore unev)             ; the operands
      (restore env)
@@ -1612,3 +1624,5 @@
   (make-machine
    eceval-operations
    eval-controller-insts))
+
+(eceval 'trace-on)
