@@ -1,0 +1,35 @@
+(define (A x y)
+  (cond ((= y 0) 0)
+        ((= x 0) (* 2 y))
+        ((= y 1) 2)
+        (else (A (- x 1)
+                 (A x (- y 1))))))
+
+(define (recursive-f n)
+  (cond ((< n 3) n)
+        (else (+ (recursive-f (- n 1))
+                 (* 2 (recursive-f (- n 2)))
+                 (* 3 (recursive-f (- n 3)))))))
+
+(define (linear-f n)
+  (define (f-iter a b c count)
+    (cond ((< count 3) (cond ((= count 2) a)
+                             ((= count 1) b)
+                             ((= count 0) c)))
+          (else (f-iter (+ a (* b 2) (* c 3)) a b (- count 1)))))
+  (f-iter 2 1 0 n))
+
+(define (pascal row column)
+  (cond ((or (= column row)
+             (= column 1)) 1)
+        (else (+ (pascal (- row 1) column)
+                 (pascal (- row 1) (- column 1))))))
+
+
+(define (cube x) (* x x x))
+(define (p x)
+  (- (* 3 x) (* 4 (cube x))))
+(define (sine angle)
+   (if (not (> (abs angle) 0.1))
+       angle
+       (p (sine (/ angle 3.0)))))
